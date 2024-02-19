@@ -6,26 +6,33 @@
 # Created on February 2023
 ################################################################################
 
-
-
-
 ################################################################################
 #
-# LOAD LIBRARIES AND SETUP
+# LOAD LIBRARIES AND CLEANING ENVIRONMENT
 #
 ################################################################################
+#-------------------------------------------------------------------------------
+# LIBRARIES
 library(tidyverse)
 library (caret)
-library (doSNOW)
+# library (doSNOW)
 
+#-------------------------------------------------------------------------------
+# CLEANING ENVIRONMENT
 rm (list = ls())
+
 
 ################################################################################
 #
 # ACCESS DATA
 #
 ################################################################################
+#-------------------------------------------------------------------------------
+# ALTERNATIVE 01 - LOAD FILE SAVED LOCALLY
+pl_data <- read.csv("./backup.csv", header = TRUE, sep = ",", stringsAsFactors = FALSE)
 
+#-------------------------------------------------------------------------------
+# ALTERNATIVE 02 - DOWNLOAD FILE IF NOT SAVED ALREADY LOCALLY
 temp_file <- tempfile()
 
 # OpenPowerLifting hosts a project for gathering PL competition data - there are 3M rows related to PL meetings participations! 
@@ -42,19 +49,22 @@ file_target_name <- file_list [which(file_list$Length == max(file_list$Length)),
 
 # 2) now I can unzip and put into a df the "right" file
 pl_data <- read.csv(unzip(temp_file, file_target_name), header = TRUE, sep = ",", stringsAsFactors = FALSE)
+
+# let's discard the file used to download the list
+unlink(temp_file)
+
+#-------------------------------------------------------------------------------
+# BACKUP SECTION - SAVING
+write.csv (pl_data, file = "./backup.csv", sep = ",", row.names = FALSE, col.names = TRUE, append = FALSE, quote  = FALSE)
+# will have to write code to zip the csv file
+
+#-------------------------------------------------------------------------------
+# DATA CHECK
 ncol(pl_data) #41
 nrow(pl_data) #3M rows!
 class(pl_data) # data.frame
 head(pl_data)
 
-?write.csv
-
-write.csv (pl_data, file = "./backup.csv", sep = ",", row.names = FALSE, col.names = TRUE, append = FALSE, quote  = FALSE)
-# will have to write code to zip the csv file
-
-# let's discard the file used to download the list
-unlink(temp_file)
-  
 
 ################################################################################
 #
@@ -277,54 +287,132 @@ pl_data %>%
 # 
 ################################################################################
 
-
 #-------------------------------------------------------------------------------
 nrow (pl_data)
 pl_filtered <- pl_data %>%
   filter (Event == "SBD") %>%
   filter (Age != 0 & Age > 0 & !is.na (Age)) %>%
   filter (BodyweightKg != 0 & TotalKg > 0 & !is.na (BodyweightKg)) %>%
-  filter (TotalKg != 0 & TotalKg > 0 & !is.na (TotalKg))
+  filter (TotalKg != 0 & TotalKg > 0 & !is.na (TotalKg)) %>%
+  filter (Sex != "Mx")
 
 nrow(pl_filtered)
 
-#-------------------------------------------------------------------------------
+pl_filtered$Sex <- as.factor(as.character(pl_filtered$Sex))
+levels(pl_filtered$Sex)
 
-# I now use the createDataPartition of caret to split the pl_filtered df into a training and testing data sets
+#-------------------------------------------------------------------------------
+# we need to subset the pl_filtered df as it size would make the whole R session to crash
+set.seed (12345)
+# 3000 random rows from the 1M 
+indexes <- sample (x = c(1:nrow(pl_filtered)), size = 3000, replace = FALSE)
+pl_fitered_final <- pl_filtered[indexes,]
+
+
+# I now use the createDataPartition of caret to split the pl_filtered_final df into a training and testing data sets
 set.seed(12345)
-inTrain = createDataPartition(y = pl_filtered$Sex, p = .2, list = FALSE)
-training = pl_filtered[inTrain,]
-testing = pl_filtered[-inTrain,] 
+inTrain = createDataPartition(y = pl_fitered_final$Sex, p = .75, list = FALSE)
+training = pl_fitered_final[inTrain,]
+testing = pl_fitered_final[-inTrain,] 
+
 
 # I also reduce the weights by limiting the number of columns to the ones included into the features
 features <- c("Sex", "Age", "BodyweightKg", "TotalKg")
 training <- training [, features]
 testing <- testing[, features]
 
-nrow (pl_filtered) * 0.2
+nrow (pl_fitered_final) * 0.75
 nrow (training) # it worked
-
-
 
 # I now create the cross validation control 
 # fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
 
-
 # let's now create the model
 set.seed(12345)
 # let's use some CPU cores...
-cl <- makeCluster(2, type = "SOCK") # 4 child processes with Socket Server 
-registerDoSNOW(cl) # register the cluster so Caret understands that will have to use it
+# cl <- makeCluster(2, type = "SOCK") # 4 child processes with Socket Server 
+# registerDoSNOW(cl) # register the cluster so Caret understands that will have to use it
 
 # let's also monitor the time used
 start.time <- Sys.time()
 
 # caret rf training
-mfFit1 <- train(Sex ~ ., data = training, method = "rf", verbose = FALSE)
+rfFit1 <- train(Sex ~ ., data = training, method = "rf", verbose = FALSE)
+rfFit1
+# accuracy 0.8808832
+
 
 end.time <- Sys.time()
 
-stopCluster(cl)
+# stopCluster(cl)
+# time.taken <- round(end.time - start.time,2)
+# time.taken
 
-time.taken <- round(end.time - start.time,2)
-time.taken
+rfPrediction <- predict (rfFit1, testing)
+
+
+test <- ifelse (rfPrediction == testing$Sex, "OK", "KO")
+table (test) 
+664/nrow(testing) #0.8865154
+
+
+#-------------------------------------------------------------------------------
+# recreate training and testing to test other features for prediction
+head(pl_fitered_final)
+training = pl_fitered_final[inTrain,]
+testing = pl_fitered_final[-inTrain,] 
+
+# I also reduce the weights by limiting the number of columns to the ones included into the features
+features <- c("Sex", "Equipment" , "Age", "BodyweightKg", "TotalKg")
+training <- training [, features]
+testing <- testing[, features]
+
+nrow (pl_fitered_final) * 0.75
+nrow (training) # it worked
+
+# I now create the cross validation control 
+# fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+# let's now create the model
+set.seed(12345)
+
+# caret rf training
+rfFit2 <- train(Sex ~ ., data = training, method = "rf", verbose = FALSE)
+rfFit2 # accuracy 0.8898891
+
+rfPrediction <- predict (rfFit2, testing)
+
+test <- ifelse (rfPrediction == testing$Sex, "OK", "KO")
+table (test) 
+657/nrow(testing) #0.8771696
+
+
+#-------------------------------------------------------------------------------
+# adding cross validation
+# recreate training and testing to test other features for prediction
+head(pl_fitered_final)
+training = pl_fitered_final[inTrain,]
+testing = pl_fitered_final[-inTrain,] 
+
+# I also reduce the weights by limiting the number of columns to the ones included into the features
+features <- c("Sex", "Equipment" , "Age", "BodyweightKg", "TotalKg")
+training <- training [, features]
+testing <- testing[, features]
+
+# I now create the cross validation control 
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+# let's now create the model
+set.seed(12345)
+
+# caret rf training
+rfFit3 <- train(Sex ~ ., data = training, method = "rf", trControl = fitControl, verbose = FALSE)
+rfFit2 # accuracy 0.8898891 without CV
+rfFit3 # accuracy 0.8925798 with CV
+
+rfPrediction <- predict (rfFit3, testing)
+
+test <- ifelse (rfPrediction == testing$Sex, "OK", "KO")
+table (test) 
+666/nrow(testing) #0.8891956
+

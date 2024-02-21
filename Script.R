@@ -12,7 +12,7 @@
 #
 ################################################################################
 #-------------------------------------------------------------------------------
-# LIBRARIES
+# LOAD LIBRARIES
 library(tidyverse)
 library (caret)
 library (doSNOW)
@@ -20,6 +20,7 @@ library (doSNOW)
 #-------------------------------------------------------------------------------
 # CLEANING ENVIRONMENT
 rm (list = ls())
+
 
 
 ################################################################################
@@ -33,9 +34,11 @@ pl_data <- read.csv("./backup.csv", header = TRUE, sep = ",", stringsAsFactors =
 
 #-------------------------------------------------------------------------------
 # ALTERNATIVE 02 - DOWNLOAD FILE IF NOT SAVED ALREADY LOCALLY
+# The file is 150Mb so it takes time, it is preferable use Alternative 01 if possible
+
 temp_file <- tempfile()
 
-# OpenPowerLifting hosts a project for gathering PL competition data - there are 3M rows related to PL meetings participations! 
+# OpenPowerLifting hosts a project for gathering PL competition data - there are 3M rows related to PL meetings participations as of Feb 2024
 data_url <-  "https://openpowerlifting.gitlab.io/opl-csv/files/openpowerlifting-latest.zip"
 
 # increases the timeout as otherwise will be insufficient to download large files
@@ -53,8 +56,10 @@ pl_data <- read.csv(unzip(temp_file, file_target_name), header = TRUE, sep = ","
 # let's discard the file used to download the list
 unlink(temp_file)
 
+
 #-------------------------------------------------------------------------------
 # BACKUP SECTION - SAVING
+# Run this section as soon as you have downloaded the file for the first time to make an accessible local copy
 write.csv (pl_data, file = "./backup.csv", sep = ",", row.names = FALSE, col.names = TRUE, append = FALSE, quote  = FALSE)
 # will have to write code to zip the csv file
 
@@ -79,7 +84,7 @@ head(pl_data) # all good
 # DATA DICTIONARY
 # Source: https://openpowerlifting.gitlab.io/opl-csv/bulk-csv-docs.html
 ################################################################################
-
+# I just go through some of the main features of the data set
 
 #-------------------------------------------------------------------------------
 # Name - Mandatory. The name of the lifter in UTF-8 encoding.
@@ -290,9 +295,10 @@ pl_data %>%
 # FILTERING THE PL_DATA TABLE TO RETURN RECORDS HAVING ALL DATA (AGE, BW, EVENT, TOTAL KG AND SEX)
 # 
 ################################################################################
+# 3M rows are so many that we can subset them to a lower number and still remain with plenty of records to analyse
 
 #-------------------------------------------------------------------------------
-nrow (pl_data)
+nrow (pl_data) #3.059.043
 
 pl_filtered <- pl_data %>%
   filter (Event == "SBD") %>%
@@ -302,17 +308,21 @@ pl_filtered <- pl_data %>%
   filter (Best3SquatKg != 0 & Best3SquatKg > 0 & !is.na (Best3SquatKg)) %>%
   filter (Best3BenchKg != 0 & Best3BenchKg > 0 & !is.na (Best3BenchKg)) %>%
   filter (Best3DeadliftKg != 0 & Best3DeadliftKg > 0 & !is.na (Best3DeadliftKg)) %>%
-  filter (Sex != "Mx")
+  filter (Sex != "Mx") %>%
+  filter (Equipment != "Straps")
 
-nrow(pl_filtered)
+nrow(pl_filtered) #1.350.512
+
 
 pl_filtered$Sex <- as.factor(as.character(pl_filtered$Sex)) # otherwise the missing data from Mx will fail the train() 
-levels(pl_filtered$Sex) # OK
+levels(pl_filtered$Sex) # removed one level that was anyway very small
 
-pl_filtered$Sex <- as.factor(as.character(pl_filtered$Sex)) # otherwise the missing data from Mx will fail the train() 
+pl_filtered[which(as.character(pl_filtered$AgeClass) == "5-12"),]$AgeClass <- as.factor("05-12")
 
-pl_filtered[which(pl_filtered$AgeClass == "5-12"),]$AgeClass <- "05-12"
+pl_filtered$AgeClass <- as.factor (pl_filtered$AgeClass)
 
+pl_filtered$Equipment <- as.factor (pl_filtered$Equipment)
+levels(pl_filtered$Equipment) # removed straps
 
 ################################################################################
 #
@@ -411,8 +421,23 @@ pl_filtered[indexes,] %>%
   geom_point(alpha = 0.5) +
   facet_wrap(~ Sex)
 
-l_model <- lm (Best3BenchKg ~ Best3SquatKg + Sex, data = pl_filtered[indexes,]) 
-summary(l_model)
+# let's try with some improvements
+pl_filtered[indexes,] %>%
+  ggplot (aes(x = Best3BenchKg, y = Best3SquatKg)) +
+  geom_jitter(alpha = 0.5,
+             color = "black",
+             shape = 21,
+             fill = "yellow") +
+  labs (x = "Best Bench",
+        y = "Best Squat",
+        title = "Correlation between Bench and Squat Performance"
+  ) +
+  facet_wrap(~ Sex) +
+  theme_classic()
+
+
+# l_model <- lm (Best3BenchKg ~ Best3SquatKg + Sex, data = pl_filtered[indexes,]) 
+# summary(l_model)
 
 ################################################################################
 #
@@ -421,13 +446,12 @@ summary(l_model)
 ################################################################################
 
 #-------------------------------------------------------------------------------
-# we need to subset the pl_filtered df as it size would make the whole R session to crash
+# We need to subset the pl_filtered df as it size would make the whole R session to crash
 # as before we select just a reduced number of rows
 
 set.seed (12345)
-indexes <- sample (x = c(1:nrow(pl_filtered)), size = 4000, replace = FALSE)
+indexes <- sample (x = c(1:nrow(pl_filtered)), size = 7000, replace = FALSE)
 pl_fitered_final <- pl_filtered[indexes,]
-
 
 # I now use the createDataPartition of caret to split the pl_filtered_final df into a training and testing data sets
 set.seed(12345)
@@ -438,12 +462,8 @@ testing = pl_fitered_final[-inTrain,]
 nrow (pl_fitered_final) * 0.75
 nrow (training) # it worked
 
-
-
 #-------------------------------------------------------------------------------
-
-#features <- c("Sex","AgeClass", "Equipment", "BodyweightKg", "TotalKg")
-
+# let's play with some features and cycle over them to see which ones are a good predictor  of the SEX
 features <- c("Sex", "BodyweightKg", "AgeClass")
 training <- training [, features]
 testing <- testing[, features]
@@ -455,26 +475,72 @@ cl <- makeCluster(4, type = "SOCK") # n child processes with Socket Server
 registerDoSNOW(cl) # register the cluster so Caret understands that will have to use it
 
 start.time <- Sys.time() # let's also monitor the time used
-
 set.seed(12345)
-rfFit1 <- train(Sex ~ ., data = testing, method = "rf", trControl = fitControl, verbose = FALSE) # caret rf training
+rfFit1 <- train(Sex ~ ., data = training, method = "rf", trControl = fitControl, verbose = FALSE) # caret rf training
 end.time <- Sys.time() # process completed 
 stopCluster(cl) # stop parallel processing
 
+total.time <- round(end.time - start.time)
+total.time # 22 seconds
+
+rfFit1 # 0.8015
 
 #-------------------------------------------------------------------------------
+features <- c("Sex", "BodyweightKg", "AgeClass", "Best3BenchKg") #let's add the bench
 
+training <- training [, features]
+testing <- testing[, features]
 
+# I now create the cross validation control 
+fitControl <- trainControl(method = "repeatedcv", number = 3, repeats = 10)
+
+cl <- makeCluster(4, type = "SOCK") # n child processes with Socket Server 
+registerDoSNOW(cl) # register the cluster so Caret understands that will have to use it
+
+start.time <- Sys.time() # let's also monitor the time used
+set.seed(12345)
+rfFit2 <- train(Sex ~ ., data = training, method = "rf", trControl = fitControl, verbose = FALSE) # caret rf training
+end.time <- Sys.time() # process completed 
+stopCluster(cl) # stop parallel processing
+
+total.time <- round(end.time - start.time)
+total.time # 36 seconds
+
+rfFit2 # 0.8940
 
 
 #-------------------------------------------------------------------------------
+features <- c("Sex", "BodyweightKg", "AgeClass", "Best3BenchKg", "Equipment") 
+
+training <- training [, features]
+
+# I now create the cross validation control 
+fitControl <- trainControl(method = "repeatedcv", number = 3, repeats = 10)
+
+cl <- makeCluster(4, type = "SOCK") # n child processes with Socket Server 
+registerDoSNOW(cl) # register the cluster so Caret understands that will have to use it
+
+start.time <- Sys.time() # let's also monitor the time used
+set.seed(12345)
+rfFit3 <- train(Sex ~ ., data = training, method = "rf", trControl = fitControl, verbose = FALSE) # caret rf training
+end.time <- Sys.time() # process completed 
+stopCluster(cl) # stop parallel processing
+
+total.time <- round(end.time - start.time)
+total.time # 36 seconds
+
+rfFit3 # 0.8940
+summary(training)
+
+
 
 #-------------------------------------------------------------------------------
 # prediction on test set
 
-rfPrediction <- predict (rfFit1, testing)
+rfPrediction <- predict (rfFit2, pl_filtered[-indexes])
 
-test <- ifelse (rfPrediction == testing$Sex, "OK", "KO")
-table (test) 
+rfPrediction_accuracy <- ifelse (rfPrediction == pl_filtered[-indexes]$Sex, 1, 0)
 
-881/nrow(testing) #0.881
+table (rfPrediction_accuracy) 
+
+sum(rfPrediction_accuracy)/nrow(pl_filtered[-indexes])

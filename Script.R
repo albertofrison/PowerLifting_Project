@@ -317,11 +317,11 @@ nrow(pl_filtered) #1.350.512
 pl_filtered$Sex <- as.factor(as.character(pl_filtered$Sex)) # otherwise the missing data from Mx will fail the train() 
 levels(pl_filtered$Sex) # removed one level that was anyway very small
 
-pl_filtered[which(as.character(pl_filtered$AgeClass) == "5-12"),]$AgeClass <- as.factor("05-12")
-
+pl_filtered[which(as.character(pl_filtered$AgeClass) == "5-12"),]$AgeClass <- "05-12"
 pl_filtered$AgeClass <- as.factor (pl_filtered$AgeClass)
+levels(pl_filtered$AgeClass)
 
-pl_filtered$Equipment <- as.factor (pl_filtered$Equipment)
+pl_filtered$Equipment <- as.factor (as.character(pl_filtered$Equipment))
 levels(pl_filtered$Equipment) # removed straps
 
 ################################################################################
@@ -386,15 +386,21 @@ pl_filtered %>%
 # source: https://www.youtube.com/watch?v=RNSOpZmUq9I
 
 pl_filtered %>%
+  filter (Sex == "M") %>%
   ggplot (aes(x = as.factor(AgeClass), y = Best3DeadliftKg, fill = Sex)) +
-  geom_boxplot() +
-  facet_wrap(~ Sex) +
-  scale_fill_viridis_d() +
+  geom_boxplot(fill = "yellow", color = "black") +
+  # facet_wrap(~ Sex) +
+  #scale_fill_viridis_d() +
   scale_y_continuous(limits = c(0,500)) +
-  labs (x = "AgeClass", y = "KG", title = "Best DL per Age Class, grouped by Sex") +
-  theme_classic()
+  labs (x = "Age Class",
+        y = "Top Deadlift (Kg)",
+        title = "Top Deadlift in Powerlifting Competitions per Age Class (Males)",
+        subtitle = paste("Chart includes", format(nrow(pl_filtered), big.mark = "."), "lifts"),
+        caption = "Source: Open Powerlifting Project - Made with ♥︎ by Alberto Frison"
+        ) +
+  theme_bw()
 
-
+ggsave("./chart.png", device ="png", width = 1920*2, height = 1080*2, units ="px")
 
 #-------------------------------------------------------------------------------
 # scatterplot chart, Lift vs Lift, wrapped by sex [this is the a chart that makes a lots of sense]

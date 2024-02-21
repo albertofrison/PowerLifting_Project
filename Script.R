@@ -63,7 +63,7 @@ write.csv (pl_data, file = "./backup.csv", sep = ",", row.names = FALSE, col.nam
 ncol(pl_data) #41
 nrow(pl_data) #3M rows!
 class(pl_data) # data.frame
-head(pl_data)
+head(pl_data) # all good
 
 
 ################################################################################
@@ -72,7 +72,14 @@ head(pl_data)
 # Source: https://openpowerlifting.gitlab.io/opl-csv/bulk-csv-docs.html
 ################################################################################
 
+#-------------------------------------------------------------------------------
+# transform into factor some data listed as categories
 str (pl_data)
+pl_data$Sex <- as.factor (pl_data$Sex)
+pl_data$Event <- as.factor (pl_data$Event)
+pl_data$Equipment <- as.factor (pl_data$Equipment)
+
+
 
 #-------------------------------------------------------------------------------
 # Name - Mandatory. The name of the lifter in UTF-8 encoding.
@@ -82,7 +89,6 @@ str (pl_data)
 #-------------------------------------------------------------------------------
 # Sex - # Mandatory. The sex category in which the lifter competed, M, F, or Mx.
 table (pl_data$Sex)
-pl_data$Sex <- as.factor (pl_data$Sex)
 
 # Mx (pronounced Muks) is a gender-neutral title — like Mr and Ms — originating from the UK. It is a catch-all sex category that is particularly appropriate for non-binary lifters.
 # The Sex column is defined by crates/opltypes/src/sex.rs.
@@ -90,7 +96,6 @@ pl_data$Sex <- as.factor (pl_data$Sex)
 #-------------------------------------------------------------------------------
 # Event - Mandatory. The type of competition that the lifter entered.
 table (pl_data$Event)
-pl_data$Event <- as.factor (pl_data$Event)
 
 # Values are as follows:
 # SBD: Squat-Bench-Deadlift, also commonly called "Full Power".
@@ -105,7 +110,6 @@ pl_data$Event <- as.factor (pl_data$Event)
 #-------------------------------------------------------------------------------
 # Equipment - Mandatory. The equipment category under which the lifts were performed.
 table (pl_data$Equipment)
-pl_data$Equipment <- as.factor (pl_data$Equipment)
 
 # Note that this does not mean that the lifter was actually wearing that equipment! For example, GPC-affiliated federations do not have a category that disallows knee wraps. Therefore, all lifters, even if they only wore knee sleeves, nevertheless competed in the Wraps equipment category, because they were allowed to wear wraps.
 # Values are as follows:
@@ -289,17 +293,82 @@ pl_data %>%
 
 #-------------------------------------------------------------------------------
 nrow (pl_data)
+
 pl_filtered <- pl_data %>%
   filter (Event == "SBD") %>%
-  filter (Age != 0 & Age > 0 & !is.na (Age)) %>%
+  filter (AgeClass != "" & !is.na (AgeClass)) %>%
   filter (BodyweightKg != 0 & TotalKg > 0 & !is.na (BodyweightKg)) %>%
   filter (TotalKg != 0 & TotalKg > 0 & !is.na (TotalKg)) %>%
+  filter (Best3SquatKg != 0 & Best3SquatKg > 0 & !is.na (Best3SquatKg)) %>%
+  filter (Best3BenchKg != 0 & Best3BenchKg > 0 & !is.na (Best3BenchKg)) %>%
+  filter (Best3DeadliftKg != 0 & Best3DeadliftKg > 0 & !is.na (Best3DeadliftKg)) %>%
   filter (Sex != "Mx")
 
 nrow(pl_filtered)
 
-pl_filtered$Sex <- as.factor(as.character(pl_filtered$Sex))
-levels(pl_filtered$Sex)
+pl_filtered$Sex <- as.factor(as.character(pl_filtered$Sex)) # otherwise the missing data from Mx will fail the train() 
+levels(pl_filtered$Sex) # OK
+
+pl_filtered$Sex <- as.factor(as.character(pl_filtered$Sex)) # otherwise the missing data from Mx will fail the train() 
+
+pl_filtered[which(pl_filtered$AgeClass == "5-12"),]$AgeClass <- "05-12"
+
+
+################################################################################
+#
+# EDA Section
+# 
+################################################################################
+
+#-------------------------------------------------------------------------------
+# simple box plot charts, by sex
+summary(pl_filtered)
+
+pl_filtered %>%
+  ggplot (aes(x = Sex, y = Best3SquatKg, fill = Sex)) +
+  geom_boxplot()
+
+pl_filtered %>%
+  ggplot (aes(x = Sex, y = Best3BenchKg, fill = Sex)) +
+  geom_boxplot()
+
+pl_filtered %>%
+  ggplot (aes(x = Sex, y = Best3DeadliftKg, fill = Sex)) +
+  geom_boxplot()
+
+#-------------------------------------------------------------------------------
+# boxplot chart, by equipment, wrapped by sex
+
+pl_filtered %>%
+  ggplot (aes(x = Equipment, y = Best3SquatKg, fill = Sex)) +
+  geom_boxplot() +
+  facet_wrap(~ Sex)
+
+pl_filtered %>%
+  ggplot (aes(x = Equipment, y = Best3BenchKg, fill = Sex)) +
+  geom_boxplot() +
+  facet_wrap(~ Sex)
+
+pl_filtered %>%
+  ggplot (aes(x = Equipment, y = Best3DeadliftKg, fill = Sex)) +
+  geom_boxplot() +
+  facet_wrap(~ Sex)
+
+#-------------------------------------------------------------------------------
+# boxplot chart, by AgeClass, wrapped by sex [this is the a chart that makes a lots of sense]
+pl_filtered %>%
+  ggplot (aes(x = as.factor(AgeClass), y = Best3SquatKg, fill = Sex)) +
+  geom_boxplot() +
+  facet_wrap(~ Sex)
+
+
+
+################################################################################
+#
+# ML Section
+# 
+################################################################################
+
 
 #-------------------------------------------------------------------------------
 # we need to subset the pl_filtered df as it size would make the whole R session to crash

@@ -15,7 +15,7 @@
 # LIBRARIES
 library(tidyverse)
 library (caret)
-# library (doSNOW)
+library (doSNOW)
 
 #-------------------------------------------------------------------------------
 # CLEANING ENVIRONMENT
@@ -59,26 +59,26 @@ write.csv (pl_data, file = "./backup.csv", sep = ",", row.names = FALSE, col.nam
 # will have to write code to zip the csv file
 
 #-------------------------------------------------------------------------------
-# DATA CHECK
-ncol(pl_data) #41
-nrow(pl_data) #3M rows!
-class(pl_data) # data.frame
-head(pl_data) # all good
-
-
-################################################################################
-#
-# DATA DICTIONARY
-# Source: https://openpowerlifting.gitlab.io/opl-csv/bulk-csv-docs.html
-################################################################################
-
-#-------------------------------------------------------------------------------
+# DATA MANIPULATION
 # transform into factor some data listed as categories
 str (pl_data)
 pl_data$Sex <- as.factor (pl_data$Sex)
 pl_data$Event <- as.factor (pl_data$Event)
 pl_data$Equipment <- as.factor (pl_data$Equipment)
 
+#-------------------------------------------------------------------------------
+# DATA CHECK
+ncol(pl_data) #41
+nrow(pl_data) #3M rows!
+class(pl_data) # data.frame
+head(pl_data) # all good
+#==> ready to go!
+
+################################################################################
+#
+# DATA DICTIONARY
+# Source: https://openpowerlifting.gitlab.io/opl-csv/bulk-csv-docs.html
+################################################################################
 
 
 #-------------------------------------------------------------------------------
@@ -319,6 +319,11 @@ pl_filtered[which(pl_filtered$AgeClass == "5-12"),]$AgeClass <- "05-12"
 # EDA Section
 # 
 ################################################################################
+#-------------------------------------------------------------------------------
+pl_filtered %>%
+  ggplot (aes(x = Sex, y = BodyweightKg, fill = Sex)) +
+  geom_boxplot()
+
 
 #-------------------------------------------------------------------------------
 # simple box plot charts, by sex
@@ -367,10 +372,18 @@ pl_filtered %>%
   geom_boxplot() +
   facet_wrap(~ Sex)
 
+# here some charts improvement from CS50 class n R - Lecture 5 - Visualizing Data
+# source: https://www.youtube.com/watch?v=RNSOpZmUq9I
+
 pl_filtered %>%
   ggplot (aes(x = as.factor(AgeClass), y = Best3DeadliftKg, fill = Sex)) +
   geom_boxplot() +
-  facet_wrap(~ Sex)
+  facet_wrap(~ Sex) +
+  scale_fill_viridis_d() +
+  scale_y_continuous(limits = c(0,500)) +
+  labs (x = "AgeClass", y = "KG", title = "Best DL per Age Class, grouped by Sex") +
+  theme_classic()
+
 
 
 #-------------------------------------------------------------------------------
@@ -379,6 +392,7 @@ pl_filtered %>%
 
 set.seed (12345)
 indexes <- sample (x = c(1:nrow(pl_filtered)), size = nrow(pl_filtered)*0.01, replace = FALSE)
+length(indexes)
 
 pl_filtered[indexes,] %>%
   ggplot (aes(x = Best3SquatKg, y = Best3DeadliftKg, color = Sex)) +
@@ -406,12 +420,12 @@ summary(l_model)
 # 
 ################################################################################
 
-
 #-------------------------------------------------------------------------------
 # we need to subset the pl_filtered df as it size would make the whole R session to crash
+# as before we select just a reduced number of rows
+
 set.seed (12345)
-# 3000 random rows from the 1M 
-indexes <- sample (x = c(1:nrow(pl_filtered)), size = 3000, replace = FALSE)
+indexes <- sample (x = c(1:nrow(pl_filtered)), size = 4000, replace = FALSE)
 pl_fitered_final <- pl_filtered[indexes,]
 
 
@@ -421,104 +435,46 @@ inTrain = createDataPartition(y = pl_fitered_final$Sex, p = .75, list = FALSE)
 training = pl_fitered_final[inTrain,]
 testing = pl_fitered_final[-inTrain,] 
 
-
-# I also reduce the weights by limiting the number of columns to the ones included into the features
-features <- c("Sex", "Age", "BodyweightKg", "TotalKg")
-training <- training [, features]
-testing <- testing[, features]
-
 nrow (pl_fitered_final) * 0.75
 nrow (training) # it worked
 
+
+
+#-------------------------------------------------------------------------------
+
+#features <- c("Sex","AgeClass", "Equipment", "BodyweightKg", "TotalKg")
+
+features <- c("Sex", "BodyweightKg", "AgeClass")
+training <- training [, features]
+testing <- testing[, features]
+
 # I now create the cross validation control 
-# fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+fitControl <- trainControl(method = "repeatedcv", number = 3, repeats = 10)
 
-# let's now create the model
+cl <- makeCluster(4, type = "SOCK") # n child processes with Socket Server 
+registerDoSNOW(cl) # register the cluster so Caret understands that will have to use it
+
+start.time <- Sys.time() # let's also monitor the time used
+
 set.seed(12345)
-# let's use some CPU cores...
-# cl <- makeCluster(2, type = "SOCK") # 4 child processes with Socket Server 
-# registerDoSNOW(cl) # register the cluster so Caret understands that will have to use it
-
-# let's also monitor the time used
-start.time <- Sys.time()
-
-# caret rf training
-rfFit1 <- train(Sex ~ ., data = training, method = "rf", verbose = FALSE)
-rfFit1
-# accuracy 0.8808832
+rfFit1 <- train(Sex ~ ., data = testing, method = "rf", trControl = fitControl, verbose = FALSE) # caret rf training
+end.time <- Sys.time() # process completed 
+stopCluster(cl) # stop parallel processing
 
 
-end.time <- Sys.time()
+#-------------------------------------------------------------------------------
 
-# stopCluster(cl)
-# time.taken <- round(end.time - start.time,2)
-# time.taken
+
+
+
+#-------------------------------------------------------------------------------
+
+#-------------------------------------------------------------------------------
+# prediction on test set
 
 rfPrediction <- predict (rfFit1, testing)
 
-
 test <- ifelse (rfPrediction == testing$Sex, "OK", "KO")
 table (test) 
-664/nrow(testing) #0.8865154
 
-
-#-------------------------------------------------------------------------------
-# recreate training and testing to test other features for prediction
-head(pl_fitered_final)
-training = pl_fitered_final[inTrain,]
-testing = pl_fitered_final[-inTrain,] 
-
-# I also reduce the weights by limiting the number of columns to the ones included into the features
-features <- c("Sex", "Equipment" , "Age", "BodyweightKg", "TotalKg")
-training <- training [, features]
-testing <- testing[, features]
-
-nrow (pl_fitered_final) * 0.75
-nrow (training) # it worked
-
-# I now create the cross validation control 
-# fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
-
-# let's now create the model
-set.seed(12345)
-
-# caret rf training
-rfFit2 <- train(Sex ~ ., data = training, method = "rf", verbose = FALSE)
-rfFit2 # accuracy 0.8898891
-
-rfPrediction <- predict (rfFit2, testing)
-
-test <- ifelse (rfPrediction == testing$Sex, "OK", "KO")
-table (test) 
-657/nrow(testing) #0.8771696
-
-
-#-------------------------------------------------------------------------------
-# adding cross validation
-# recreate training and testing to test other features for prediction
-head(pl_fitered_final)
-training = pl_fitered_final[inTrain,]
-testing = pl_fitered_final[-inTrain,] 
-
-# I also reduce the weights by limiting the number of columns to the ones included into the features
-features <- c("Sex", "Equipment" , "Age", "BodyweightKg", "TotalKg")
-training <- training [, features]
-testing <- testing[, features]
-
-# I now create the cross validation control 
-fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
-
-# let's now create the model
-set.seed(12345)
-
-# caret rf training
-rfFit3 <- train(Sex ~ ., data = training, method = "rf", trControl = fitControl, verbose = FALSE)
-rfFit2 # accuracy 0.8898891 without CV
-rfFit3 # accuracy 0.8925798 with CV
-
-rfPrediction <- predict (rfFit3, testing)
-
-test <- ifelse (rfPrediction == testing$Sex, "OK", "KO")
-table (test) 
-666/nrow(testing) #0.8891956
-
+881/nrow(testing) #0.881

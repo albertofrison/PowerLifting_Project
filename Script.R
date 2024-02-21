@@ -356,12 +356,49 @@ pl_filtered %>%
 
 #-------------------------------------------------------------------------------
 # boxplot chart, by AgeClass, wrapped by sex [this is the a chart that makes a lots of sense]
+
 pl_filtered %>%
   ggplot (aes(x = as.factor(AgeClass), y = Best3SquatKg, fill = Sex)) +
   geom_boxplot() +
   facet_wrap(~ Sex)
 
+pl_filtered %>%
+  ggplot (aes(x = as.factor(AgeClass), y = Best3BenchKg, fill = Sex)) +
+  geom_boxplot() +
+  facet_wrap(~ Sex)
 
+pl_filtered %>%
+  ggplot (aes(x = as.factor(AgeClass), y = Best3DeadliftKg, fill = Sex)) +
+  geom_boxplot() +
+  facet_wrap(~ Sex)
+
+
+#-------------------------------------------------------------------------------
+# scatterplot chart, Lift vs Lift, wrapped by sex [this is the a chart that makes a lots of sense]
+# there are too many points to be drawn, so I will subset the whole data frame to 1% and then plot
+
+set.seed (12345)
+indexes <- sample (x = c(1:nrow(pl_filtered)), size = nrow(pl_filtered)*0.01, replace = FALSE)
+
+pl_filtered[indexes,] %>%
+  ggplot (aes(x = Best3SquatKg, y = Best3DeadliftKg, color = Sex)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~ Sex)
+
+
+pl_filtered[indexes,] %>%
+  ggplot (aes(x = Best3BenchKg, y = Best3DeadliftKg, color = Sex)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~ Sex)
+
+
+pl_filtered[indexes,] %>%
+  ggplot (aes(x = Best3BenchKg, y = Best3SquatKg, color = Sex)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~ Sex)
+
+l_model <- lm (Best3BenchKg ~ Best3SquatKg + Sex, data = pl_filtered[indexes,]) 
+summary(l_model)
 
 ################################################################################
 #
